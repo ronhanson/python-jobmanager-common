@@ -6,7 +6,7 @@ About
 
 This library attempts to provide a Job Manager common library to use with client or api
 
-Project url : https://github.com/ronhanson/python-jobmanager-client
+Project url : https://github.com/ronhanson/python-jobmanager-common
 
 
 Usage
