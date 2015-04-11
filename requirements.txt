@@ -3,6 +3,3 @@ six >= 1.8.0
 pymongo
 mongoengine
 blinker
-flask
-requests
-boto
