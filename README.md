@@ -1,10 +1,10 @@
-Job Manager Client
+Job Manager Common
 ==================
 
 About
 -----
 
-This library attempts to provide a Job Manager client package to install
+This library attempts to provide a Job Manager common library to use with client or api
 
 Project url : https://github.com/ronhanson/python-jobmanager-client
 
@@ -13,10 +13,6 @@ Usage
 -----
 
 ***Lib Usage***
-
-<BLAH>
-
-***Script Usage***
 
 <BLAH>
 
