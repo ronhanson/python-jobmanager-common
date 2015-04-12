@@ -2,3 +2,4 @@
 2015-04-12	--	v0.1.0	-- First code commit
 2015-04-12	--	v0.2.0	-- Change on requirements, package extension, etc.
 2015-04-12	--	v0.2.1	-- Added module field
+2015-04-12	--	v0.2.2	-- Updated requirements
