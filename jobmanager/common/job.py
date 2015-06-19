@@ -92,8 +92,11 @@ class Job(BaseDocument):
     finished = mongoengine.DateTimeField()
     history = mongoengine.ListField(field=mongoengine.DictField(), default=[])
 
+    def __str__(self):
+        return "%s %s (%s)" % (self.name, self.uuid, self.status)
+
     def __repr__(self):
-        return "%s %s (%s)" % (self.name, self.id, self.status)
+        return self.__str__()
 
     def process(self):
         raise NotImplementedError('The process method shall be subclassed to define the job processing.')
