@@ -95,9 +95,12 @@ class Job(BaseDocument):
     def __repr__(self):
         return "%s %s (%s)" % (self.name, self.id, self.status)
 
+    def process(self):
+        raise NotImplementedError('The process method shall be subclassed to define the job processing.')
+
     def run(self):
         self.started = datetime.datetime.utcnow()
-        self.update_status('running', completion=1, text='Running job')
+        self.update_status(status='running', completion=1, text='Running job')
         try:
             self.log_debug("Launching job process...")
             self.process()
@@ -120,15 +123,21 @@ class Job(BaseDocument):
         if self.status == 'error':
             log = self.log_error
         if status:
-            log("Status update : {status} - {progress:5.1f}% - {message}".format(self.status, str(self.completion), self.status_text))
+            log("Status update : {status} - {progress:5.1f}% - {message}".format(
+                status=self.status,
+                progress=self.completion,
+                message=self.status_text
+            ))
         else:
-            log("Progress update : {progress:5.1f}% - {message}".format(str(self.completion), self.status_text))
+            log("Progress update : {progress:5.1f}% - {message}".format(
+                progress=self.completion,
+                message=self.status_text
+            ))
         self.update(
             add_to_set__history={'t': datetime.datetime.now(), 'm': self.status_text, 'c': self.completion, 's': self.status},
             status=self.status,
             completion=self.completion,
             status_text=self.status_text
-
         )
 
     def update_progress(self, completion, text=None):
