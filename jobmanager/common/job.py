@@ -45,6 +45,7 @@ class BaseDocument(mongoengine.Document):
     name = mongoengine.StringField(required=True)
     created = mongoengine.DateTimeField(required=True, default=datetime.datetime.utcnow)
     updated = mongoengine.DateTimeField(required=True)
+    module = mongoengine.StringField()
 
     meta = {
         'ordering': ['+created'],

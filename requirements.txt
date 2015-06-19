@@ -1,5 +1,5 @@
 tbx
 six >= 1.8.0
-pymongo
+pymongo < 3.0
 mongoengine
 blinker
