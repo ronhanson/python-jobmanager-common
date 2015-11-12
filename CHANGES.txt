@@ -3,3 +3,4 @@
 2015-04-12	--	v0.2.0	-- Change on requirements, package extension, etc.
 2015-04-12	--	v0.2.1	-- Added module field
 2015-04-12	--	v0.2.2	-- Updated requirements
+2015-11-12	--	v0.2.3-stable	-- Minor changes
