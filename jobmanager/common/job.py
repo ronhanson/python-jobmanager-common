@@ -90,13 +90,20 @@ class Job(BaseDocument):
     params = mongoengine.DictField(default={})
     started = mongoengine.DateTimeField()
     finished = mongoengine.DateTimeField()
+    history = mongoengine.ListField(field=mongoengine.DictField(), default=[])
+
+    def __str__(self):
+        return "%s %s (%s)" % (self.name, self.uuid, self.status)
 
     def __repr__(self):
-        return "%s %s (%s)" % (self.name, self.id, self.status)
+        return self.__str__()
+
+    def process(self):
+        raise NotImplementedError('The process method shall be subclassed to define the job processing.')
 
     def run(self):
         self.started = datetime.datetime.utcnow()
-        self.save_status('running', completion=1, text='Running job')
+        self.update_status(status='running', completion=1, text='Running job')
         try:
             self.log_debug("Launching job process...")
             self.process()
@@ -106,25 +113,44 @@ class Job(BaseDocument):
         else:
             self.save_as_successful()
 
-    def save_status(self, status, completion=None, text=None):
-        self.status = status
-        if status in ['success', 'error']:
-            self.finished = datetime.datetime.utcnow()
+    def update_status(self, status=None, completion=None, text=None):
+        if status:
+            self.status = status
+            if status in ['success', 'error']:
+                self.finished = datetime.datetime.utcnow()
         if text:
             self.status_text = text
         if completion:
             self.completion = completion
         log = self.log_info
-        if status == 'error':
+        if self.status == 'error':
             log = self.log_error
-        log("Status update : %s - %s%% - %s" % (self.status, str(self.completion), self.status_text))
-        self.save()
+        if status:
+            log("Status update : {status} - {progress:5.1f}% - {message}".format(
+                status=self.status,
+                progress=self.completion,
+                message=self.status_text
+            ))
+        else:
+            log("Progress update : {progress:5.1f}% - {message}".format(
+                progress=self.completion,
+                message=self.status_text
+            ))
+        self.update(
+            add_to_set__history={'t': datetime.datetime.now(), 'm': self.status_text, 'c': self.completion, 's': self.status},
+            status=self.status,
+            completion=self.completion,
+            status_text=self.status_text
+        )
+
+    def update_progress(self, completion, text=None):
+        self.update_status(completion=completion, text=text)
 
     def save_as_successful(self, text='Job Successful'):
-        self.save_status('success', completion=100, text=text)
+        self.update_status('success', completion=100, text=text)
 
     def save_as_error(self, text='Job Error'):
-        self.save_status('error', text=text)
+        self.update_status('error', text=text)
 
     def to_safe_dict(self):
         d = public_dict(self.to_mongo())

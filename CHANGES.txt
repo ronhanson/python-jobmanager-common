@@ -3,4 +3,11 @@
 2015-04-12	--	v0.2.0	-- Change on requirements, package extension, etc.
 2015-04-12	--	v0.2.1	-- Added module field
 2015-04-12	--	v0.2.2	-- Updated requirements
-2015-11-12	--	v0.2.3-stable	-- Minor changes
+2015-06-19	--	v0.3.0	-- Updated progress functions and history field
+2015-06-19	--	v0.3.1	-- Version merge
+2015-06-19	--	v0.3.1a	-- Updated classifier for Windows
+2015-06-19	--	v0.3.2	-- Bugfix
+2015-06-19	--	v0.3.3	-- Small enhancements
+2015-11-12	--	v0.3.4-stable	-- Minor changes
+
+2015-11-12	--	v0.3.5-stable	-- Change merge
