@@ -14,3 +14,4 @@
 2015-11-12	--	v0.3.5a-stable	-- build tools update
 2015-11-13	--	v0.3.6-stable	-- misc
 2015-11-13	--	v0.3.7-stable	-- Added tbx as a dependency
+2015-11-13	--	v0.3.8-stable	-- Deb dependencies update
