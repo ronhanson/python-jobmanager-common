@@ -90,6 +90,8 @@ class Job(BaseDocument):
     params = mongoengine.DictField(default={})
     started = mongoengine.DateTimeField()
     finished = mongoengine.DateTimeField()
+    timeout = mongoengine.IntField(min_value=0, default=0)
+    ttl = mongoengine.IntField(min_value=1, default=1)
     history = mongoengine.ListField(field=mongoengine.DictField(), default=[])
 
     def __str__(self):
@@ -140,7 +142,9 @@ class Job(BaseDocument):
             add_to_set__history={'t': datetime.datetime.now(), 'm': self.status_text, 'c': self.completion, 's': self.status},
             status=self.status,
             completion=self.completion,
-            status_text=self.status_text
+            status_text=self.status_text,
+            started=self.started,
+            finished=self.finished
         )
 
     def update_progress(self, completion, text=None):
@@ -174,7 +178,7 @@ class ExecuteJob(Job):
     output = mongoengine.StringField(default=None)
 
     def process(self):
-        logging.info('Executing job ExecuteJob...')
+        logging.info('ExecuteJob %s - Executing command...' % self.uuid)
         result = tbx.process.execute(self.command, return_output=True)
         logging.info(result)
         self.output = result
