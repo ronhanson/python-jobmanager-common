@@ -10,7 +10,6 @@ import os
 import logging
 import mongoengine
 import mongoengine.signals
-import datetime
 import tbx
 import tbx.process
 import tbx.service
@@ -18,16 +17,31 @@ import tbx.log
 import tbx.text
 import uuid as UUID
 import traceback
+from datetime import datetime, timedelta
 
 
 def update_modified(sender, document, **kwargs):
-    document.updated = datetime.datetime.utcnow()
+    document.updated = datetime.utcnow()
 
 
 def public_dict(d):
-    safe_dict = dict((key, value) for key, value in d.items() if not key.startswith('_'))
-    safe_dict['type'] = d['_cls']
-    return safe_dict
+    """ if type(d) is dict:
+        return dict((k, public_dict(v)) for k, v in d.items() if not k.startswith('_'))
+    elif type(d) is list:
+        return [public_dict(v) for v in d]
+    else:
+        return d
+    """
+
+    if isinstance(d, dict):
+        safe_dict = dict((key, public_dict(value)) for key, value in d.items() if not key.startswith('_'))
+        if '_cls' in d:
+            safe_dict['type'] = d['_cls']
+        return safe_dict
+    if isinstance(d, list):
+        return [public_dict(l) for l in d]
+
+    return d
 
 
 class SerializableQuerySet(mongoengine.QuerySet):
@@ -36,15 +50,39 @@ class SerializableQuerySet(mongoengine.QuerySet):
         return tbx.text.render_json(self.as_pymongo())
 
     def to_safe_dict(self):
-        return [public_dict(f) for f in self.as_pymongo()]
+        return [f.to_safe_dict() for f in self]
+        #return [public_dict(f) for f in self.as_pymongo()]
 
 
 class BaseDocument(mongoengine.Document):
 
+    created = mongoengine.DateTimeField(required=True, default=datetime.utcnow)
+    updated = mongoengine.DateTimeField(required=True, default=datetime.utcnow)
+
+    meta = {
+        'ordering': ['+created'],
+        'allow_inheritance': True,
+        'queryset_class': SerializableQuerySet,
+        'abstract': True,
+        'indexes': [
+            'created',
+        ]
+    }
+
+    def __init__(self, *args, **values):
+        super(BaseDocument, self).__init__(*args, **values)
+
+    def to_json(self):
+        return tbx.text.render_json(self.to_mongo())
+
+    def to_safe_dict(self):
+        return public_dict(self.to_mongo())
+
+
+class NamedDocument(BaseDocument):
+
     uuid = mongoengine.StringField(required=True, default=tbx.text.random_short_slug, unique=True)
     name = mongoengine.StringField(required=True)
-    created = mongoengine.DateTimeField(required=True, default=datetime.datetime.utcnow)
-    updated = mongoengine.DateTimeField(required=True)
     module = mongoengine.StringField()
 
     meta = {
@@ -59,21 +97,15 @@ class BaseDocument(mongoengine.Document):
     }
 
     def __init__(self, *args, **values):
-        super(BaseDocument, self).__init__(*args, **values)
+        super(NamedDocument, self).__init__(*args, **values)
         if not self.name:
             self.name = self.__class__.__name__
 
     def __repr__(self):
         return "%s %s" % (self.name, self.uuid)
 
-    def to_json(self):
-        return tbx.text.render_json(self.to_mongo())
 
-    def to_safe_dict(self):
-        return public_dict(self.to_mongo())
-
-
-class Job(BaseDocument):
+class Job(NamedDocument):
 
     meta = {
         'collection': 'jobs',
@@ -104,7 +136,7 @@ class Job(BaseDocument):
         raise NotImplementedError('The process method shall be subclassed to define the job processing.')
 
     def run(self):
-        self.started = datetime.datetime.utcnow()
+        self.started = datetime.utcnow()
         self.update_status(status='running', completion=1, text='Running job')
         try:
             self.log_debug("Launching job process...")
@@ -119,7 +151,7 @@ class Job(BaseDocument):
         if status:
             self.status = status
             if status in ['success', 'error']:
-                self.finished = datetime.datetime.utcnow()
+                self.finished = datetime.utcnow()
         if text:
             self.status_text = text
         if completion:
@@ -139,7 +171,7 @@ class Job(BaseDocument):
                 message=self.status_text
             ))
         self.update(
-            add_to_set__history={'t': datetime.datetime.now(), 'm': self.status_text, 'c': self.completion, 's': self.status},
+            add_to_set__history={'t': datetime.now(), 'm': self.status_text, 'c': self.completion, 's': self.status},
             status=self.status,
             completion=self.completion,
             status_text=self.status_text,
@@ -157,9 +189,7 @@ class Job(BaseDocument):
         self.update_status('error', text=text)
 
     def to_safe_dict(self):
-        d = public_dict(self.to_mongo())
-        d['type'] = self._cls
-        return d
+        return public_dict(self.to_mongo())
 
     def log_debug(self, text):
         logging.debug("%s - %s" % (self, text))
@@ -183,3 +213,66 @@ class ExecuteJob(Job):
         logging.info(result)
         self.output = result
 
+
+class Client(NamedDocument):
+    meta = {
+        'ordering': ['-updated'],
+        'max_documents': 10000,
+        'queryset_class': SerializableQuerySet,
+        'indexes': [
+            'uuid',
+            'created',
+            'updated',
+            'hostname'
+        ]
+    }
+    hostname = mongoengine.StringField(required=True)
+    pid = mongoengine.IntField(required=True)
+    job_types = mongoengine.ListField(required=True, field=mongoengine.StringField(), default=[])
+    pool_size = mongoengine.IntField(required=True, min_value=1)
+
+    def history(self, offset=0, limit=30):
+        statuses = ClientStatus.objects(client=self).order_by('-created')[offset:limit]
+        return [s.to_safe_dict(with_client=False) for s in statuses]
+
+    def alive(self):
+        recent_count = ClientStatus.objects(client=self, created__gte=datetime.utcnow() - timedelta(minutes=1)).count()
+        return recent_count > 0
+
+    def last_seen_alive(self):
+        last_status = ClientStatus.objects(client=self).order_by('-created').only('created').first()
+        if not last_status or not last_status.created:
+            return None
+        return last_status.created
+
+    def to_safe_dict(self, with_history=False):
+        r = super(Client, self).to_safe_dict()
+        r['alive'] = self.alive()
+        r['last_seen_alive'] = self.last_seen_alive()
+        if with_history:
+            r['history'] = self.history()
+        return r
+
+class ClientStatus(BaseDocument):
+
+    meta = {
+        'ordering': ['-created'],
+        'max_size': 2000000,
+        'queryset_class': SerializableQuerySet,
+        'indexes': [
+            'created',
+            'updated',
+            'client'
+        ] 
+    }
+    client = mongoengine.CachedReferenceField(Client, fields=['uuid'], reverse_delete_rule=mongoengine.CASCADE)
+    current_jobs = mongoengine.ListField(field=mongoengine.CachedReferenceField(Job, fields=['uuid', '_cls'], auto_sync=True), default=[])
+    busy_slots = mongoengine.IntField(required=True, min_value=0)
+    available_slots = mongoengine.IntField(required=True, min_value=0)
+
+    def to_safe_dict(self, with_client=True):
+        r = super(ClientStatus, self).to_safe_dict()
+        if not with_client:
+            del r['client']
+            del r['type']
+        return r
