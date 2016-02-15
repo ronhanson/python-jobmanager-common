@@ -245,12 +245,12 @@ class Client(NamedDocument):
             return None
         return last_status.created
 
-    def to_safe_dict(self, with_history=False):
+    def to_safe_dict(self, with_history=False, offset=0, limit=30):
         r = super(Client, self).to_safe_dict()
         r['alive'] = self.alive()
         r['last_seen_alive'] = self.last_seen_alive()
         if with_history:
-            r['history'] = self.history()
+            r['history'] = self.history(offset=offset, limit=limit)
         return r
 
 class ClientStatus(BaseDocument):
@@ -263,7 +263,7 @@ class ClientStatus(BaseDocument):
             'created',
             'updated',
             'client'
-        ] 
+        ]
     }
     client = mongoengine.CachedReferenceField(Client, fields=['uuid'], reverse_delete_rule=mongoengine.CASCADE)
     current_jobs = mongoengine.ListField(field=mongoengine.CachedReferenceField(Job, fields=['uuid', '_cls'], auto_sync=True), default=[])
