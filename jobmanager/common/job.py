@@ -117,6 +117,8 @@ class Job(NamedDocument):
 
     status = mongoengine.StringField(required=True, default="pending", choices=('new', 'pending', 'running', 'success', 'error'))
     status_text = mongoengine.StringField(required=True, default="")
+    client_hostname = mongoengine.StringField(required=False)
+    client_uuid = mongoengine.StringField(required=False)
     details = mongoengine.StringField(default="")
     completion = mongoengine.IntField(required=True, min_value=0, max_value=100, default=0)
     params = mongoengine.DictField(default={})
@@ -269,6 +271,7 @@ class ClientStatus(BaseDocument):
     current_jobs = mongoengine.ListField(field=mongoengine.CachedReferenceField(Job, fields=['uuid', '_cls'], auto_sync=True), default=[])
     busy_slots = mongoengine.IntField(required=True, min_value=0)
     available_slots = mongoengine.IntField(required=True, min_value=0)
+    system_status = mongoengine.DictField(default={})
 
     def to_safe_dict(self, with_client=True):
         r = super(ClientStatus, self).to_safe_dict()

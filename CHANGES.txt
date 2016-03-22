@@ -20,3 +20,4 @@
 2016-02-15	--	v0.5.1	-- Fix
 2016-02-25	--	v0.5.3	-- fix
 2016-02-25	--	v0.5.4	-- fix 
+2016-03-22	--	v0.6.0	-- Added Client UUID+HOSTNAME + SYSTEM STATUS
