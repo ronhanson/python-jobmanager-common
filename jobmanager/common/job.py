@@ -99,10 +99,10 @@ class NamedDocument(BaseDocument):
     def __init__(self, *args, **values):
         super(NamedDocument, self).__init__(*args, **values)
         if not self.name:
-            self.name = self.__class__.__name__
+            self.name = self.__class__.__name__ + ' ' + self.uuid
 
     def __repr__(self):
-        return "%s %s" % (self.name, self.uuid)
+        return self.name
 
 
 class Job(NamedDocument):
@@ -129,7 +129,7 @@ class Job(NamedDocument):
     history = mongoengine.ListField(field=mongoengine.DictField(), default=[])
 
     def __str__(self):
-        return "%s %s (%s)" % (self.name, self.uuid, self.status)
+        return "%s (%s)" % (self.name, self.status)
 
     def __repr__(self):
         return self.__str__()
@@ -144,8 +144,10 @@ class Job(NamedDocument):
             self.log_debug("Launching job process...")
             self.process()
         except Exception as e:
+            self.log_exception(e)
             self.details = "Exception : %s" % str(traceback.format_exc())
             self.save_as_error(text="Error while running job (%s)." % e)
+            raise e
         else:
             self.save_as_successful()
 
@@ -202,7 +204,43 @@ class Job(NamedDocument):
     def log_error(self, text):
         logging.error("%s - %s" % (self, text))
 
+    def log_exception(self, text):
+        logging.exception("%s - %s" % (self, text))
+
 mongoengine.signals.pre_save.connect(update_modified)
+
+
+class JobTask(mongoengine.EmbeddedDocument):
+    meta = {
+        'abstract': True,
+        'allow_inheritance': True,
+    }
+
+    @property
+    def name(self):
+        return self.__class__.__name__
+
+    @property
+    def job(self):
+        return self._instance
+
+    def __str__(self):
+        return "%s > %s" % (self.job, self.name)
+
+    def __repr__(self):
+        return self.__str__()
+
+    def log_debug(self, text):
+        logging.debug("%s - %s" % (self, text))
+
+    def log_info(self, text):
+        logging.info("%s - %s" % (self, text))
+
+    def log_error(self, text):
+        logging.error("%s - %s" % (self, text))
+
+    def log_exception(self, text):
+        logging.exception("%s - %s" % (self, text))
 
 
 class ExecuteJob(Job):
