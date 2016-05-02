@@ -177,6 +177,7 @@ class Job(NamedDocument):
         self.update(
             add_to_set__history={'t': datetime.now(), 'm': self.status_text, 'c': self.completion, 's': self.status},
             status=self.status,
+            details=self.details,
             completion=self.completion,
             status_text=self.status_text,
             started=self.started,
@@ -213,7 +214,6 @@ mongoengine.signals.pre_save.connect(update_modified)
 class JobTask(mongoengine.EmbeddedDocument):
     meta = {
         'abstract': True,
-        'allow_inheritance': True,
     }
 
     @property
