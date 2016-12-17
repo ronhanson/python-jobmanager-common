@@ -23,3 +23,4 @@
 2016-03-22	--	v0.6.0	-- Added Client UUID+HOSTNAME + SYSTEM STATUS
 2016-04-06	--	v0.7.0	-- Added job task and small changes
 2016-05-02	--	v0.7.1	-- Fix
+2016-12-17	--	v0.8.0	-- Plenty of changes about logs, status, etc.

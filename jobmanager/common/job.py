@@ -57,7 +57,7 @@ class SerializableQuerySet(mongoengine.QuerySet):
 class BaseDocument(mongoengine.Document):
 
     created = mongoengine.DateTimeField(required=True, default=datetime.utcnow)
-    updated = mongoengine.DateTimeField(required=True, default=datetime.utcnow)
+    updated = mongoengine.DateTimeField(default=datetime.utcnow)
 
     meta = {
         'ordering': ['+created'],
@@ -196,17 +196,27 @@ class Job(NamedDocument):
     def to_safe_dict(self):
         return public_dict(self.to_mongo())
 
+    @property
+    def extra_log_arguments(self):
+        return {
+            'job_type': self.__class__.__name__,
+            'job_uuid': self.uuid,
+            'job_status': self.status,
+            'client_hostname': self.client_hostname,
+            'client_uuid': self.client_uuid,
+        }
+
     def log_debug(self, text):
-        logging.debug("%s - %s" % (self, text))
+        logging.debug("%s - %s" % (self, text), extra=self.extra_log_arguments)
 
     def log_info(self, text):
-        logging.info("%s - %s" % (self, text))
+        logging.info("%s - %s" % (self, text), extra=self.extra_log_arguments)
 
     def log_error(self, text):
-        logging.error("%s - %s" % (self, text))
+        logging.error("%s - %s" % (self, text), extra=self.extra_log_arguments)
 
     def log_exception(self, text):
-        logging.exception("%s - %s" % (self, text))
+        logging.exception("%s - %s" % (self, text), extra=self.extra_log_arguments)
 
 mongoengine.signals.pre_save.connect(update_modified)
 
@@ -236,6 +246,9 @@ class JobTask(mongoengine.EmbeddedDocument):
     def log_info(self, text):
         logging.info("%s - %s" % (self, text))
 
+    def log_warning(self, text):
+        logging.warning("%s - %s" % (self, text))
+
     def log_error(self, text):
         logging.error("%s - %s" % (self, text))
 
@@ -254,6 +267,19 @@ class ExecuteJob(Job):
         self.output = result
 
 
+class WaitJob(Job):
+    duration = mongoengine.IntField(required=True)
+    fail_ratio = mongoengine.FloatField(default=0.0, min_value=0.0, max_value=1.0)
+
+    def process(self):
+        import time
+        import random
+        for i in range(0, self.duration):
+            time.sleep(1)
+            self.update_progress(i / self.duration*100.0, "Waiting %d seconds over %d (%0.1f%%)" % (i, self.duration, i / self.duration*100.0))
+            if random.random() < self.fail_ratio:
+                raise Exception('Arbitrary fail ratio triggered. Exiting job with Exception raised.')
+
 class Client(NamedDocument):
     meta = {
         'ordering': ['-updated'],
@@ -262,7 +288,6 @@ class Client(NamedDocument):
         'indexes': [
             'uuid',
             'created',
-            'updated',
             'hostname'
         ]
     }
@@ -270,9 +295,17 @@ class Client(NamedDocument):
     pid = mongoengine.IntField(required=True)
     job_types = mongoengine.ListField(required=True, field=mongoengine.StringField(), default=[])
     pool_size = mongoengine.IntField(required=True, min_value=1)
+    hostname = mongoengine.StringField(required=True)
+    platform = mongoengine.DictField()
+    boot_time = mongoengine.DateTimeField()
+    python_version = mongoengine.StringField()
+    python_packages = mongoengine.ListField(field=mongoengine.StringField())
 
-    def history(self, offset=0, limit=30):
-        statuses = ClientStatus.objects(client=self).order_by('-created')[offset:limit]
+    def history(self, offset=0, limit=30, step=0):
+        step_filter = {}
+        if step and step>1:
+            step_filter = {'index__mod':(step,0)}
+        statuses = ClientStatus.objects(client=self, **step_filter).order_by('-created')[offset:limit]
         return [s.to_safe_dict(with_client=False) for s in statuses]
 
     def alive(self):
@@ -285,31 +318,33 @@ class Client(NamedDocument):
             return None
         return last_status.created
 
-    def to_safe_dict(self, with_history=False, offset=0, limit=30):
+    def to_safe_dict(self, alive=False, with_history=False, offset=0, limit=30, step=0):
         r = super(Client, self).to_safe_dict()
-        r['alive'] = self.alive()
-        r['last_seen_alive'] = self.last_seen_alive()
+        if alive:
+            r['alive'] = self.alive()
+            r['last_seen_alive'] = self.last_seen_alive()
         if with_history:
-            r['history'] = self.history(offset=offset, limit=limit)
+            r['history'] = self.history(offset=offset, limit=limit, step=step)
         return r
+
 
 class ClientStatus(BaseDocument):
 
     meta = {
         'ordering': ['-created'],
-        'max_size': 2000000,
+        'max_documents': 200000,
+        'max_size': 200000000,
         'queryset_class': SerializableQuerySet,
         'indexes': [
             'created',
-            'updated',
             'client'
         ]
     }
     client = mongoengine.CachedReferenceField(Client, fields=['uuid'], reverse_delete_rule=mongoengine.CASCADE)
+    index = mongoengine.LongField(required=True, default=0)
     current_jobs = mongoengine.ListField(field=mongoengine.CachedReferenceField(Job, fields=['uuid', '_cls'], auto_sync=True), default=[])
-    busy_slots = mongoengine.IntField(required=True, min_value=0)
-    available_slots = mongoengine.IntField(required=True, min_value=0)
     system_status = mongoengine.DictField(default={})
+    updated = None
 
     def to_safe_dict(self, with_client=True):
         r = super(ClientStatus, self).to_safe_dict()
