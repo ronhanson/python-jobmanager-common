@@ -175,7 +175,7 @@ class Job(NamedDocument):
                 message=self.status_text
             ))
         self.update(
-            add_to_set__history={'t': datetime.now(), 'm': self.status_text, 'c': self.completion, 's': self.status},
+            add_to_set__history={'t': datetime.utcnow(), 'm': self.status_text, 'c': self.completion, 's': self.status},
             status=self.status,
             details=self.details,
             completion=self.completion,
