@@ -64,6 +64,7 @@ class BaseDocument(mongoengine.Document):
         'allow_inheritance': True,
         'queryset_class': SerializableQuerySet,
         'abstract': True,
+        'strict': False,
         'indexes': [
             'created',
         ]

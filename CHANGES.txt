@@ -26,3 +26,4 @@
 2016-12-17	--	v0.8.0	-- Plenty of changes about logs, status, etc.
 2016-12-22	--	v0.8.1	-- Mini fix on utc datetime usage
 2016-12-23	--	v0.8.2	-- Debian packaging fix
+2016-12-23	--	v0.8.3	-- Small improvment to allow easier update
