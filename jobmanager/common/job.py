@@ -310,7 +310,7 @@ class Client(NamedDocument):
         return [s.to_safe_dict(with_client=False) for s in statuses]
 
     def alive(self):
-        recent_count = ClientStatus.objects(client=self, created__gte=datetime.utcnow() - timedelta(minutes=1)).count()
+        recent_count = ClientStatus.objects(client=self, created__gte=datetime.utcnow() - timedelta(minutes=0.5)).count()
         return recent_count > 0
 
     def last_seen_alive(self):
