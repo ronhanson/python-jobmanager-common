@@ -199,13 +199,14 @@ class Job(NamedDocument):
 
     @property
     def extra_log_arguments(self):
-        return {
-            'job_type': self.__class__.__name__,
-            'job_uuid': self.uuid,
-            'job_status': self.status,
-            'client_hostname': self.client_hostname,
-            'client_uuid': self.client_uuid,
-        }
+        if not hasattr(self, '__extra_log_arguments'):
+            self.__extra_log_arguments = {
+                'job_type': self.__class__.__name__,
+                'job_uuid': self.uuid,
+                'job_status': self.status,
+                'client_uuid': self.client_uuid,
+            }
+        return self.__extra_log_arguments
 
     def log_debug(self, text):
         logging.debug("%s - %s" % (self, text), extra=self.extra_log_arguments)
@@ -228,6 +229,13 @@ class JobTask(mongoengine.EmbeddedDocument):
     }
 
     @property
+    def extra_log_arguments(self):
+        if not hasattr(self, '__extra_log_arguments'):
+            self.__extra_log_arguments = self.job.extra_log_arguments
+            self.__extra_log_arguments['task'] = self.name
+        return self.__extra_log_arguments
+
+    @property
     def name(self):
         return self.__class__.__name__
 
@@ -242,44 +250,20 @@ class JobTask(mongoengine.EmbeddedDocument):
         return self.__str__()
 
     def log_debug(self, text):
-        logging.debug("%s - %s" % (self, text))
+        logging.debug("%s - %s" % (self, text), extra=self.extra_log_arguments)
 
     def log_info(self, text):
-        logging.info("%s - %s" % (self, text))
+        logging.info("%s - %s" % (self, text), extra=self.extra_log_arguments)
 
     def log_warning(self, text):
-        logging.warning("%s - %s" % (self, text))
+        logging.warning("%s - %s" % (self, text), extra=self.extra_log_arguments)
 
     def log_error(self, text):
-        logging.error("%s - %s" % (self, text))
+        logging.error("%s - %s" % (self, text), extra=self.extra_log_arguments)
 
     def log_exception(self, text):
-        logging.exception("%s - %s" % (self, text))
+        logging.exception("%s - %s" % (self, text), extra=self.extra_log_arguments)
 
-
-class ExecuteJob(Job):
-    command = mongoengine.StringField(required=True)
-    output = mongoengine.StringField(default=None)
-
-    def process(self):
-        logging.info('ExecuteJob %s - Executing command...' % self.uuid)
-        result = tbx.process.execute(self.command, return_output=True)
-        logging.info(result)
-        self.output = result
-
-
-class WaitJob(Job):
-    duration = mongoengine.IntField(required=True)
-    fail_ratio = mongoengine.FloatField(default=0.0, min_value=0.0, max_value=1.0)
-
-    def process(self):
-        import time
-        import random
-        for i in range(0, self.duration):
-            time.sleep(1)
-            self.update_progress(i / self.duration*100.0, "Waiting %d seconds over %d (%0.1f%%)" % (i, self.duration, i / self.duration*100.0))
-            if random.random() < self.fail_ratio:
-                raise Exception('Arbitrary fail ratio triggered. Exiting job with Exception raised.')
 
 class Client(NamedDocument):
     meta = {
