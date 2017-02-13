@@ -214,6 +214,9 @@ class Job(NamedDocument):
     def log_info(self, text):
         logging.info("%s - %s" % (self, text), extra=self.extra_log_arguments)
 
+    def log_warning(self, text):
+        logging.warning("%s - %s" % (self, text), extra=self.extra_log_arguments)
+
     def log_error(self, text):
         logging.error("%s - %s" % (self, text), extra=self.extra_log_arguments)
 
