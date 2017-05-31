@@ -6,6 +6,7 @@
 Job Manager Job Examples
 :author: Ronan Delacroix
 """
+import logging
 import tbx.process
 import mongoengine
 from . import job
@@ -17,7 +18,7 @@ class ExecuteJob(job.Job):
 
     def process(self):
         self.log_info('ExecuteJob %s - Executing command...' % self.uuid)
-        result = tbx.process.execute(self.command, return_output=True)
+        result = tbx.process.execute(self.command, return_output=True, logger=logging.getLogger())
         self.log_info(result)
         self.output = result
 

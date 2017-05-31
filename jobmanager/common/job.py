@@ -73,6 +73,10 @@ class BaseDocument(mongoengine.Document):
     def __init__(self, *args, **values):
         super(BaseDocument, self).__init__(*args, **values)
 
+    @property
+    def type(self):
+        return self.__class__.__name__
+
     def to_json(self):
         return tbx.text.render_json(self.to_mongo())
 
@@ -100,7 +104,7 @@ class NamedDocument(BaseDocument):
     def __init__(self, *args, **values):
         super(NamedDocument, self).__init__(*args, **values)
         if not self.name:
-            self.name = self.__class__.__name__ + ' ' + self.uuid
+            self.name = self.type + ' ' + self.uuid
 
     def __repr__(self):
         return self.name
@@ -122,7 +126,6 @@ class Job(NamedDocument):
     client_uuid = mongoengine.StringField(required=False)
     details = mongoengine.StringField(default="")
     completion = mongoengine.IntField(required=True, min_value=0, max_value=100, default=0)
-    params = mongoengine.DictField(default={})
     started = mongoengine.DateTimeField()
     finished = mongoengine.DateTimeField()
     timeout = mongoengine.IntField(min_value=0, default=0)
@@ -268,6 +271,28 @@ class JobTask(mongoengine.EmbeddedDocument):
         logging.exception("%s - %s" % (self, text), extra=self.extra_log_arguments)
 
 
+
+class Host(BaseDocument):
+    meta = {
+        'ordering': ['-updated'],
+        'queryset_class': SerializableQuerySet,
+        'indexes': [
+            'created',
+            'updated',
+            'hostname'
+        ]
+    }
+    hostname = mongoengine.StringField(required=True)
+    mac_address = mongoengine.StringField()
+    latest_client = mongoengine.CachedReferenceField(NamedDocument, fields=['uuid'], default=None)
+    job_slots = mongoengine.MapField(field=mongoengine.IntField(), default={})
+    job_imports = mongoengine.ListField(field=mongoengine.StringField(), default=[])
+    platform = mongoengine.DictField()
+    boot_time = mongoengine.DateTimeField()
+    python_version = mongoengine.StringField()
+    python_packages = mongoengine.ListField(field=mongoengine.StringField())
+
+
 class Client(NamedDocument):
     meta = {
         'ordering': ['-updated'],
@@ -279,10 +304,10 @@ class Client(NamedDocument):
             'hostname'
         ]
     }
+    host = mongoengine.CachedReferenceField(Host, fields=['uuid'])
     hostname = mongoengine.StringField(required=True)
     pid = mongoengine.IntField(required=True)
-    job_types = mongoengine.ListField(required=True, field=mongoengine.StringField(), default=[])
-    pool_size = mongoengine.IntField(required=True, min_value=1)
+    job_slots = mongoengine.MapField(field=mongoengine.IntField(), default={})
     hostname = mongoengine.StringField(required=True)
     platform = mongoengine.DictField()
     boot_time = mongoengine.DateTimeField()
@@ -340,3 +365,4 @@ class ClientStatus(BaseDocument):
             del r['client']
             del r['type']
         return r
+
