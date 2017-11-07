@@ -1,6 +1,7 @@
 tbx >= 1.6.1
 six >= 1.4.0
-pymongo < 3.0
+pymongo >= 3.0
 mongoengine >= 0.10.6
 blinker
 log4mongo >= 1.6
+psutil >= 2.2

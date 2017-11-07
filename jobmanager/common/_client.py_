@@ -1,0 +1,79 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+# vim: ai ts=4 sts=4 et sw=4 nu
+"""
+:Author: Ronan Delacroix
+:Copyright: (c) 2017 Ronan Delacroix
+"""
+import mongoengine
+import mongoengine.signals
+from datetime import datetime, timedelta
+import jobmanager.common as common
+import jobmanager.common.host as host
+import jobmanager.common.job as job
+
+class Client(common.NamedDocument):
+    meta = {
+        'ordering': ['-updated'],
+        'max_documents': 10000,
+        'queryset_class': common.SerializableQuerySet,
+        'indexes': [
+            'uuid',
+            'created',
+            'hostname'
+        ]
+    }
+    host = mongoengine.CachedReferenceField(host.Host, fields=['hostname'])
+    job_slots = mongoengine.MapField(field=mongoengine.IntField(), default={})
+
+    def history(self, offset=0, limit=30, step=0):
+        step_filter = {}
+        if step and step>1:
+            step_filter = {'index__mod':(step,0)}
+        statuses = ClientStatus.objects(client=self, **step_filter).order_by('-created')[offset:limit]
+        return [s.to_safe_dict(with_client=False) for s in statuses]
+
+    def alive(self):
+        recent_count = ClientStatus.objects(client=self, created__gte=datetime.utcnow() - timedelta(minutes=0.5)).count()
+        return recent_count > 0
+
+    def last_seen_alive(self):
+        last_status = ClientStatus.objects(client=self).order_by('-created').only('created').first()
+        if not last_status or not last_status.created:
+            return None
+        return last_status.created
+
+    def to_safe_dict(self, alive=False, with_history=False, offset=0, limit=30, step=0):
+        r = super(Client, self).to_safe_dict()
+        if alive:
+            r['alive'] = self.alive()
+            r['last_seen_alive'] = self.last_seen_alive()
+        if with_history:
+            r['history'] = self.history(offset=offset, limit=limit, step=step)
+        return r
+
+
+class ClientStatus(common.BaseDocument):
+
+    meta = {
+        'ordering': ['-created'],
+        'max_documents': 200000,
+        'max_size': 200000000,
+        'queryset_class': common.SerializableQuerySet,
+        'indexes': [
+            'created',
+            'client'
+        ]
+    }
+    client = mongoengine.CachedReferenceField(Client, fields=['uuid'], reverse_delete_rule=mongoengine.CASCADE)
+    index = mongoengine.LongField(required=True, default=0)
+    current_jobs = mongoengine.ListField(field=mongoengine.CachedReferenceField(job.Job, fields=['uuid', '_cls'], auto_sync=True), default=[])
+    updated = None
+
+    def to_safe_dict(self, with_client=True):
+        r = super(ClientStatus, self).to_safe_dict()
+        if not with_client:
+            del r['client']
+            del r['type']
+        return r
+

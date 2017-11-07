@@ -18,99 +18,20 @@ import tbx.text
 import uuid as UUID
 import traceback
 from datetime import datetime, timedelta
+import jobmanager.common as common
+from .host import Host
 
 
-def update_modified(sender, document, **kwargs):
-    document.updated = datetime.utcnow()
+job_status_to_icon = {
+    'new': "\u23F8",
+    'pending': "\u23F8",
+    'running': "\u25B6",
+    'success': "\u2605",
+    'error': "\u2716"
+}
 
 
-def public_dict(d):
-    """ if type(d) is dict:
-        return dict((k, public_dict(v)) for k, v in d.items() if not k.startswith('_'))
-    elif type(d) is list:
-        return [public_dict(v) for v in d]
-    else:
-        return d
-    """
-
-    if isinstance(d, dict):
-        safe_dict = dict((key, public_dict(value)) for key, value in d.items() if not key.startswith('_'))
-        if '_cls' in d:
-            safe_dict['type'] = d['_cls']
-        return safe_dict
-    if isinstance(d, list):
-        return [public_dict(l) for l in d]
-
-    return d
-
-
-class SerializableQuerySet(mongoengine.QuerySet):
-
-    def to_json(self):
-        return tbx.text.render_json(self.as_pymongo())
-
-    def to_safe_dict(self):
-        return [f.to_safe_dict() for f in self]
-        #return [public_dict(f) for f in self.as_pymongo()]
-
-
-class BaseDocument(mongoengine.Document):
-
-    created = mongoengine.DateTimeField(required=True, default=datetime.utcnow)
-    updated = mongoengine.DateTimeField(default=datetime.utcnow)
-
-    meta = {
-        'ordering': ['+created'],
-        'allow_inheritance': True,
-        'queryset_class': SerializableQuerySet,
-        'abstract': True,
-        'strict': False,
-        'indexes': [
-            'created',
-        ]
-    }
-
-    def __init__(self, *args, **values):
-        super(BaseDocument, self).__init__(*args, **values)
-
-    @property
-    def type(self):
-        return self.__class__.__name__
-
-    def to_json(self):
-        return tbx.text.render_json(self.to_mongo())
-
-    def to_safe_dict(self):
-        return public_dict(self.to_mongo())
-
-
-class NamedDocument(BaseDocument):
-
-    uuid = mongoengine.StringField(required=True, default=tbx.text.random_short_slug, unique=True)
-    name = mongoengine.StringField(required=True)
-    module = mongoengine.StringField()
-
-    meta = {
-        'ordering': ['+created'],
-        'allow_inheritance': True,
-        'queryset_class': SerializableQuerySet,
-        'abstract': True,
-        'indexes': [
-            'uuid',
-            'created',
-        ]
-    }
-
-    def __init__(self, *args, **values):
-        super(NamedDocument, self).__init__(*args, **values)
-        if not self.name:
-            self.name = self.type + ' ' + self.uuid
-
-    def __repr__(self):
-        return self.name
-
-
-class Job(NamedDocument):
+class Job(common.NamedDocument):
 
     meta = {
         'collection': 'jobs',
@@ -120,10 +41,9 @@ class Job(NamedDocument):
         ]
     }
 
+    hostname = mongoengine.StringField()
     status = mongoengine.StringField(required=True, default="pending", choices=('new', 'pending', 'running', 'success', 'error'))
     status_text = mongoengine.StringField(required=True, default="")
-    client_hostname = mongoengine.StringField(required=False)
-    client_uuid = mongoengine.StringField(required=False)
     details = mongoengine.StringField(default="")
     completion = mongoengine.IntField(required=True, min_value=0, max_value=100, default=0)
     started = mongoengine.DateTimeField()
@@ -133,7 +53,7 @@ class Job(NamedDocument):
     history = mongoengine.ListField(field=mongoengine.DictField(), default=[])
 
     def __str__(self):
-        return "%s (%s)" % (self.name, self.status)
+        return "%s %s" % (self.name, job_status_to_icon.get(self.status, self.status))
 
     def __repr__(self):
         return self.__str__()
@@ -198,7 +118,7 @@ class Job(NamedDocument):
         self.update_status('error', text=text)
 
     def to_safe_dict(self):
-        return public_dict(self.to_mongo())
+        return common.public_dict(self.to_mongo())
 
     @property
     def extra_log_arguments(self):
@@ -207,7 +127,6 @@ class Job(NamedDocument):
                 'job_type': self.__class__.__name__,
                 'job_uuid': self.uuid,
                 'job_status': self.status,
-                'client_uuid': self.client_uuid,
             }
         return self.__extra_log_arguments
 
@@ -226,13 +145,17 @@ class Job(NamedDocument):
     def log_exception(self, text):
         logging.exception("%s - %s" % (self, text), extra=self.extra_log_arguments)
 
-mongoengine.signals.pre_save.connect(update_modified)
+mongoengine.signals.pre_save.connect(common.update_modified)
 
 
 class JobTask(mongoengine.EmbeddedDocument):
     meta = {
         'abstract': True,
     }
+
+    status = mongoengine.StringField(required=True, default="pending",
+                                     choices=('new', 'pending', 'running', 'success', 'error'))
+    details = mongoengine.StringField(required=False)
 
     @property
     def extra_log_arguments(self):
@@ -246,14 +169,31 @@ class JobTask(mongoengine.EmbeddedDocument):
         return self.__class__.__name__
 
     @property
-    def job(self):
+    def parent(self):
         return self._instance
 
     def __str__(self):
-        return "%s > %s" % (self.job, self.name)
+        return "%s > %s" % (self.parent, self.name)
 
     def __repr__(self):
         return self.__str__()
+
+    def process(self, *args, **kwargs):
+        raise NotImplementedError('The process method shall be implemented to define the task processing.')
+
+    def run(self, *args, **kwargs):
+        self.status = 'running'
+        self.save()
+        try:
+            self.log_debug("Launching task process...")
+            self.process(*args, **kwargs)
+        except Exception as e:
+            self.status = 'error'
+            self.details = "Error while running task (%s)." % e
+            raise e
+        else:
+            self.status = 'success'
+        self.save()
 
     def log_debug(self, text):
         logging.debug("%s - %s" % (self, text), extra=self.extra_log_arguments)
@@ -269,100 +209,3 @@ class JobTask(mongoengine.EmbeddedDocument):
 
     def log_exception(self, text):
         logging.exception("%s - %s" % (self, text), extra=self.extra_log_arguments)
-
-
-
-class Host(BaseDocument):
-    meta = {
-        'ordering': ['-updated'],
-        'queryset_class': SerializableQuerySet,
-        'indexes': [
-            'created',
-            'updated',
-            'hostname'
-        ]
-    }
-    hostname = mongoengine.StringField(required=True)
-    mac_address = mongoengine.StringField()
-    latest_client = mongoengine.CachedReferenceField(NamedDocument, fields=['uuid'], default=None)
-    job_slots = mongoengine.MapField(field=mongoengine.IntField(), default={})
-    job_imports = mongoengine.ListField(field=mongoengine.StringField(), default=[])
-    platform = mongoengine.DictField()
-    boot_time = mongoengine.DateTimeField()
-    python_version = mongoengine.StringField()
-    python_packages = mongoengine.ListField(field=mongoengine.StringField())
-
-
-class Client(NamedDocument):
-    meta = {
-        'ordering': ['-updated'],
-        'max_documents': 10000,
-        'queryset_class': SerializableQuerySet,
-        'indexes': [
-            'uuid',
-            'created',
-            'hostname'
-        ]
-    }
-    host = mongoengine.CachedReferenceField(Host, fields=['uuid'])
-    hostname = mongoengine.StringField(required=True)
-    pid = mongoengine.IntField(required=True)
-    job_slots = mongoengine.MapField(field=mongoengine.IntField(), default={})
-    hostname = mongoengine.StringField(required=True)
-    platform = mongoengine.DictField()
-    boot_time = mongoengine.DateTimeField()
-    python_version = mongoengine.StringField()
-    python_packages = mongoengine.ListField(field=mongoengine.StringField())
-
-    def history(self, offset=0, limit=30, step=0):
-        step_filter = {}
-        if step and step>1:
-            step_filter = {'index__mod':(step,0)}
-        statuses = ClientStatus.objects(client=self, **step_filter).order_by('-created')[offset:limit]
-        return [s.to_safe_dict(with_client=False) for s in statuses]
-
-    def alive(self):
-        recent_count = ClientStatus.objects(client=self, created__gte=datetime.utcnow() - timedelta(minutes=0.5)).count()
-        return recent_count > 0
-
-    def last_seen_alive(self):
-        last_status = ClientStatus.objects(client=self).order_by('-created').only('created').first()
-        if not last_status or not last_status.created:
-            return None
-        return last_status.created
-
-    def to_safe_dict(self, alive=False, with_history=False, offset=0, limit=30, step=0):
-        r = super(Client, self).to_safe_dict()
-        if alive:
-            r['alive'] = self.alive()
-            r['last_seen_alive'] = self.last_seen_alive()
-        if with_history:
-            r['history'] = self.history(offset=offset, limit=limit, step=step)
-        return r
-
-
-class ClientStatus(BaseDocument):
-
-    meta = {
-        'ordering': ['-created'],
-        'max_documents': 200000,
-        'max_size': 200000000,
-        'queryset_class': SerializableQuerySet,
-        'indexes': [
-            'created',
-            'client'
-        ]
-    }
-    client = mongoengine.CachedReferenceField(Client, fields=['uuid'], reverse_delete_rule=mongoengine.CASCADE)
-    index = mongoengine.LongField(required=True, default=0)
-    current_jobs = mongoengine.ListField(field=mongoengine.CachedReferenceField(Job, fields=['uuid', '_cls'], auto_sync=True), default=[])
-    system_status = mongoengine.DictField(default={})
-    updated = None
-
-    def to_safe_dict(self, with_client=True):
-        r = super(ClientStatus, self).to_safe_dict()
-        if not with_client:
-            del r['client']
-            del r['type']
-        return r
-
