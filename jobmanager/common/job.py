@@ -189,7 +189,7 @@ class TempFolderProxy:
 
         log_func("Cleaning temporary folders.")
         for temp_folder in self.temp_folders:
-            #shutil.rmtree(temp_folder, ignore_errors=True)
+            shutil.rmtree(temp_folder, ignore_errors=True)
             log_func("  - Removed %s" % temp_folder)
         self.__temp_folders = []
         log_func("Cleaning done.")
