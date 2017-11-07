@@ -17,7 +17,10 @@ import tbx.log
 import tbx.text
 import uuid as UUID
 import traceback
+import tempfile
+import shutil
 from datetime import datetime, timedelta
+from tbx.code import cached_property
 
 
 def update_modified(sender, document, **kwargs):
@@ -83,12 +86,16 @@ class BaseDocument(mongoengine.Document):
     def to_safe_dict(self):
         return public_dict(self.to_mongo())
 
+    def get_hash(self):
+        import base64
+        import hashlib
+        return base64.b64encode(hashlib.sha1(mongoengine.Document.to_json(self, sort_keys=True).encode()).digest()).decode().strip('=').replace("+", "-")
+
 
 class NamedDocument(BaseDocument):
 
     uuid = mongoengine.StringField(required=True, default=tbx.text.random_short_slug, unique=True)
     name = mongoengine.StringField(required=True)
-    module = mongoengine.StringField()
 
     meta = {
         'ordering': ['+created'],
@@ -110,7 +117,130 @@ class NamedDocument(BaseDocument):
         return self.name
 
 
-class Job(NamedDocument):
+class LogProxy:
+
+    def __str__(self):
+        return self.name
+
+    def __repr__(self):
+        return self.__str__()
+
+    @property
+    def name(self):
+        return self.__class__.__name__
+
+    @property
+    def extra_log_arguments(self):
+        return {}
+
+    def log(self, text, method=logging.info):
+        return method("%s - %s" % (self, text), extra=self.extra_log_arguments)
+
+    def log_debug(self, text):
+        return self.log(text, logging.debug)
+
+    def log_info(self, text):
+        return self.log(text, logging.info)
+
+    def log_warning(self, text):
+        return self.log(text, logging.warning)
+
+    def log_error(self, text):
+        return self.log(text, logging.error)
+
+    def log_exception(self, text):
+        return self.log(text, logging.exception)
+
+
+class TempFolderProxy:
+
+    @property
+    def temp_folders(self):
+        try:
+            return self.__temp_folders
+        except AttributeError:
+            self.__temp_folders = []
+        return self.__temp_folders
+
+    def get_new_temp_folder(self, prefix=None):
+        if prefix:
+            prefix = prefix + '_'
+        temp_folder = tempfile.mkdtemp(prefix=prefix)
+        self.temp_folders.append(temp_folder)
+        return temp_folder
+
+    def get_named_temp_folder(self, name):
+        temp_folder = os.path.join(tempfile.gettempdir(), name)
+        os.makedirs(temp_folder, exist_ok=True)
+        self.temp_folders.append(temp_folder)
+        return temp_folder
+
+    def clean_temp(self):
+
+        if isinstance(self, LogProxy):
+            log_func = self.log_debug
+        else:
+            def do_nothing(*args, **kwargs):
+                pass
+            log_func = do_nothing
+
+        if not self.temp_folders:
+            return
+
+        log_func("Cleaning temporary folders.")
+        for temp_folder in self.temp_folders:
+            #shutil.rmtree(temp_folder, ignore_errors=True)
+            log_func("  - Removed %s" % temp_folder)
+        self.__temp_folders = []
+        log_func("Cleaning done.")
+
+
+class Runnable(TempFolderProxy):
+
+    status = mongoengine.StringField(required=True, default="pending", choices=('new', 'pending', 'running', 'success', 'error'))
+    started = mongoengine.DateTimeField()
+    finished = mongoengine.DateTimeField()
+    details = mongoengine.StringField(required=False)
+    result = mongoengine.DynamicField(required=False)
+
+    def process(self, *args, **kwargs):
+        raise NotImplementedError('The "process" method shall be subclassed to define the runnable processing.')
+
+    def pre_process(self, *args, **kwargs):
+        # should be overridden
+        pass
+
+    def post_process(self, result):
+        self.result = result
+        return self.result
+
+    def run(self, *args, **kwargs):
+        self.started = datetime.utcnow()
+        self.status = 'running'
+        self.save()
+        try:
+            self.log_debug("Launching process...")
+            self.pre_process(*args, **kwargs)
+            result = self.process(*args, **kwargs)
+            result = self.post_process(result)  # strangely can be useful
+        except Exception as e:
+            self.log_exception(e)
+            self.details = "Exception : %s" % str(traceback.format_exc())
+            self.status = 'error'
+            self.finished = datetime.utcnow()
+            self.save()
+            raise e
+        else:
+            self.status = 'success'
+            self.finished = datetime.utcnow()
+            self.save()
+        finally:
+            self.log_info("Process done (%s)." % self.status)
+            self.clean_temp()
+        return result
+
+
+class Job(NamedDocument, Runnable, LogProxy):
 
     meta = {
         'collection': 'jobs',
@@ -120,14 +250,10 @@ class Job(NamedDocument):
         ]
     }
 
-    status = mongoengine.StringField(required=True, default="pending", choices=('new', 'pending', 'running', 'success', 'error'))
     status_text = mongoengine.StringField(required=True, default="")
     client_hostname = mongoengine.StringField(required=False)
     client_uuid = mongoengine.StringField(required=False)
-    details = mongoengine.StringField(default="")
     completion = mongoengine.IntField(required=True, min_value=0, max_value=100, default=0)
-    started = mongoengine.DateTimeField()
-    finished = mongoengine.DateTimeField()
     timeout = mongoengine.IntField(min_value=0, default=0)
     ttl = mongoengine.IntField(min_value=1, default=1)
     history = mongoengine.ListField(field=mongoengine.DictField(), default=[])
@@ -135,49 +261,41 @@ class Job(NamedDocument):
     def __str__(self):
         return "%s (%s)" % (self.name, self.status)
 
-    def __repr__(self):
-        return self.__str__()
+    @cached_property
+    def extra_log_arguments(self):
+        return {
+            'job_type': self.__class__.__name__,
+            'job_uuid': self.uuid,
+            'job_status': self.status,
+            'client_uuid': self.client_uuid,
+        }
 
-    def process(self):
-        raise NotImplementedError('The process method shall be subclassed to define the job processing.')
+    #def run(self):
+    #    self.update_status(completion=1, text='Running job')
+    #    try:
+    #        super(Job, self).run()
+    #    except Exception as e:
+    #        self.save_as_error(text="Error while running job (%s)." % e)
+    #        raise e
+    #    else:
+    #        self.save_as_successful()
 
-    def run(self):
-        self.started = datetime.utcnow()
-        self.update_status(status='running', completion=1, text='Running job')
-        try:
-            self.log_debug("Launching job process...")
-            self.process()
-        except Exception as e:
-            self.log_exception(e)
-            self.details = "Exception : %s" % str(traceback.format_exc())
-            self.save_as_error(text="Error while running job (%s)." % e)
-            raise e
-        else:
-            self.save_as_successful()
-
-    def update_status(self, status=None, completion=None, text=None):
-        if status:
-            self.status = status
-            if status in ['success', 'error']:
-                self.finished = datetime.utcnow()
+    def update_status(self, completion=None, text=None):
         if text:
             self.status_text = text
+
         if completion:
             self.completion = completion
+
         log = self.log_info
         if self.status == 'error':
             log = self.log_error
-        if status:
-            log("Status update : {status} - {progress:5.1f}% - {message}".format(
-                status=self.status,
-                progress=self.completion,
-                message=self.status_text
-            ))
-        else:
-            log("Progress update : {progress:5.1f}% - {message}".format(
-                progress=self.completion,
-                message=self.status_text
-            ))
+
+        log("Progress update : {progress:5.1f}% - {message}".format(
+            progress=self.completion,
+            message=self.status_text
+        ))
+
         self.update(
             add_to_set__history={'t': datetime.utcnow(), 'm': self.status_text, 'c': self.completion, 's': self.status},
             status=self.status,
@@ -191,85 +309,86 @@ class Job(NamedDocument):
     def update_progress(self, completion, text=None):
         self.update_status(completion=completion, text=text)
 
-    def save_as_successful(self, text='Job Successful'):
-        self.update_status('success', completion=100, text=text)
+    #def save_as_successful(self, text='Job Successful'):
+    #    self.update_status(completion=100, text=text)
 
-    def save_as_error(self, text='Job Error'):
-        self.update_status('error', text=text)
+    #def save_as_error(self, text='Job Error'):
+    #    self.update_status(text=text)
 
-    def to_safe_dict(self):
-        return public_dict(self.to_mongo())
-
-    @property
-    def extra_log_arguments(self):
-        if not hasattr(self, '__extra_log_arguments'):
-            self.__extra_log_arguments = {
-                'job_type': self.__class__.__name__,
-                'job_uuid': self.uuid,
-                'job_status': self.status,
-                'client_uuid': self.client_uuid,
-            }
-        return self.__extra_log_arguments
-
-    def log_debug(self, text):
-        logging.debug("%s - %s" % (self, text), extra=self.extra_log_arguments)
-
-    def log_info(self, text):
-        logging.info("%s - %s" % (self, text), extra=self.extra_log_arguments)
-
-    def log_warning(self, text):
-        logging.warning("%s - %s" % (self, text), extra=self.extra_log_arguments)
-
-    def log_error(self, text):
-        logging.error("%s - %s" % (self, text), extra=self.extra_log_arguments)
-
-    def log_exception(self, text):
-        logging.exception("%s - %s" % (self, text), extra=self.extra_log_arguments)
 
 mongoengine.signals.pre_save.connect(update_modified)
 
 
-class JobTask(mongoengine.EmbeddedDocument):
+class JobTask(mongoengine.EmbeddedDocument, Runnable, LogProxy):
     meta = {
         'abstract': True,
     }
 
     @property
-    def extra_log_arguments(self):
-        if not hasattr(self, '__extra_log_arguments'):
-            self.__extra_log_arguments = self.job.extra_log_arguments
-            self.__extra_log_arguments['task'] = self.name
-        return self.__extra_log_arguments
-
-    @property
-    def name(self):
-        return self.__class__.__name__
-
-    @property
     def job(self):
         return self._instance
+
+    @cached_property
+    def extra_log_arguments(self):
+        extra_log_arguments = {}
+        if isinstance(self.job, LogProxy):
+            extra_log_arguments = self.job.extra_log_arguments
+        extra_log_arguments['task'] = self.name
+        return extra_log_arguments
 
     def __str__(self):
         return "%s > %s" % (self.job, self.name)
 
-    def __repr__(self):
-        return self.__str__()
+    def get_hash(self):
+        import base64
+        import hashlib
+        return base64.b64encode(
+            hashlib.sha1(mongoengine.EmbeddedDocument.to_json(self, sort_keys=True).encode()).digest()).decode().strip('=').replace("+", "-")
 
-    def log_debug(self, text):
-        logging.debug("%s - %s" % (self, text), extra=self.extra_log_arguments)
+    #def run(self, *args, **kwargs):
+    #    self.status = 'running'
+    #    self.save()
+    #    result = None
+    #    try:
+    #        self.log_debug("Launching task process...")
+    #        result = super(JobTask, self).run(*args, **kwargs)
+    #    except Exception as e:
+    #        self.status = 'error'
+    #        self.details = "Error while running task (%s)." % e
+    #        raise e
+    #    else:
+    #        self.status = 'success'
+    #    finally:
+    #        self.save()
+    #    return result
 
-    def log_info(self, text):
-        logging.info("%s - %s" % (self, text), extra=self.extra_log_arguments)
+    def update_status(self, completion=None, text=None):
+        #TODO : Review this part // Completion between tasks and jobs is not clear.
+        if text:
+            self.job.status_text = text
 
-    def log_warning(self, text):
-        logging.warning("%s - %s" % (self, text), extra=self.extra_log_arguments)
+        if completion:
+            self.completion = completion
 
-    def log_error(self, text):
-        logging.error("%s - %s" % (self, text), extra=self.extra_log_arguments)
+        log = self.log_info
+        if self.status == 'error':
+            log = self.log_error
 
-    def log_exception(self, text):
-        logging.exception("%s - %s" % (self, text), extra=self.extra_log_arguments)
+        log("Progress update : {progress:5.1f}% - {message}".format(
+            progress=completion if completion else 0,
+            message=text
+        ))
 
+    def update_progress(self, completion, text=None):
+        self.update_status(completion=completion, text=text)
+
+    #def save_as_successful(self, text='Task Successful'):
+    #    self.status = 'success'
+    #    self.job.update_status(text=text)
+
+    #def save_as_error(self, text='Task Error'):
+    #    self.status = 'error'
+    #    self.job.update_status(text=text)
 
 
 class Host(BaseDocument):
