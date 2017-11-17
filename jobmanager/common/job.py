@@ -214,7 +214,13 @@ class Runnable(TempFolderProxy):
         self.result = result
         return self.result
 
+    def safe_run(self, *args, **kwargs):
+        kwargs['safe_run'] = True
+        return self.run(*args, **kwargs)
+
     def run(self, *args, **kwargs):
+        result = None
+        safe_run = kwargs.pop('safe_run', False)
         self.started = datetime.utcnow()
         self.status = 'running'
         self.save()
@@ -229,7 +235,8 @@ class Runnable(TempFolderProxy):
             self.status = 'error'
             self.finished = datetime.utcnow()
             self.save()
-            raise e
+            if not safe_run:
+                raise e
         else:
             self.status = 'success'
             self.finished = datetime.utcnow()
@@ -240,7 +247,87 @@ class Runnable(TempFolderProxy):
         return result
 
 
-class Job(NamedDocument, Runnable, LogProxy):
+class AutoDocumentable:
+    @classmethod
+    def get_doc(cls):
+        import textwrap
+        def create_documentation(cls):
+            result = {
+                "class": cls.__name__,
+                "doc": textwrap.dedent(cls.__doc__) if cls.__doc__ else '',
+            }
+
+            if cls._subclasses:
+                subclasses = list(cls._subclasses)
+                if cls.__name__ in subclasses:
+                    subclasses.remove(cls.__name__)
+                if ('Job.' + cls.__name__) in subclasses:
+                    subclasses.remove('Job.' + cls.__name__)
+
+                if subclasses:
+                    result['sub_classes'] = subclasses
+
+            if cls._meta.get('abstract', False):
+                result['abstract'] = True
+                return result
+
+            fields = {}
+            for key, field in cls._fields.items():
+                if key in ['id', '_cls']:
+                    continue
+                field_dict = {
+                    'name': field.name,
+                    'required': field.required
+                }
+                if isinstance(field, mongoengine.EmbeddedDocumentField):
+                    field_doc = create_documentation(field.document_type_obj)
+                    field_dict['type'] = field_doc['class']
+                    if field_doc['doc']:
+                        field_dict['type_doc'] = field_doc['doc']
+                    if 'fields' in field_doc:
+                        field_dict['fields'] = field_doc['fields']
+                    if 'abstract' in field_doc:
+                        field_dict['abstract'] = field_doc['abstract']
+                    if 'sub_classes' in field_doc:
+                        field_dict['sub_classes'] = field_doc['sub_classes']
+                elif isinstance(field, mongoengine.EmbeddedDocumentListField):
+                    field_doc = create_documentation(field.field.document_type_obj)
+                    field_dict['type'] = 'List'
+                    field_dict['list_type'] = field_doc['class']
+                    if 'fields' in field_doc:
+                        field_dict['list_type_fields'] = field_doc['fields']
+                    if 'abstract' in field_doc:
+                        field_dict['abstract'] = field_doc['abstract']
+                    if 'sub_classes' in field_doc:
+                        field_dict['sub_classes'] = field_doc['sub_classes']
+                elif isinstance(field, mongoengine.ListField):
+                    field_dict['type'] = 'List'
+                    field_dict['list_type'] = field.field.__class__.__name__.replace('Field', '')
+                else:
+                    field_dict['type'] = field.__class__.__name__.replace('Field', '')
+
+                if hasattr(field, 'doc') and field.doc:
+                    field_dict['doc'] = field.doc
+
+                if hasattr(field, 'default') and field.default:
+                    if callable(field.default):
+                        field_dict['default'] = str(field.default.__name__+'()')
+                    else:
+                        field_dict['default'] = str(field.default)
+
+                if hasattr(field, 'min_value') and field.min_value:
+                    field_dict['min_value'] = field.min_value
+                if hasattr(field, 'max_value') and field.max_value:
+                    field_dict['max_value'] = field.max_value
+                fields[field.name] = field_dict
+
+            result["fields"] = fields
+            return result
+
+        return create_documentation(cls)
+
+
+class Job(NamedDocument, Runnable, LogProxy, AutoDocumentable):
 
     meta = {
         'collection': 'jobs',
@@ -319,13 +406,15 @@ class Job(NamedDocument, Runnable, LogProxy):
 mongoengine.signals.pre_save.connect(update_modified)
 
 
-class JobTask(mongoengine.EmbeddedDocument, Runnable, LogProxy):
+class JobTask(mongoengine.EmbeddedDocument, Runnable, LogProxy, AutoDocumentable):
     meta = {
         'abstract': True,
     }
 
     @property
     def job(self):
+        if isinstance(self._instance, JobTask):
+            return self._instance.job
         return self._instance
 
     @cached_property
@@ -484,4 +573,5 @@ class ClientStatus(BaseDocument):
             del r['client']
             del r['type']
         return r
+
 
