@@ -319,6 +319,8 @@ class AutoDocumentable:
                     field_dict['min_value'] = field.min_value
                 if hasattr(field, 'max_value') and field.max_value:
                     field_dict['max_value'] = field.max_value
+                if hasattr(field, 'choices') and field.choices:
+                    field_dict['choices'] = field.choices
                 fields[field.name] = field_dict
 
             result["fields"] = fields
@@ -573,5 +575,4 @@ class ClientStatus(BaseDocument):
             del r['client']
             del r['type']
         return r
-
 
