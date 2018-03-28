@@ -6,13 +6,13 @@
 :Copyright: (c) 2018 Ronan Delacroix
 """
 import mongoengine
-import jobmanager.common.job
+import jobmanager.common
 
 
-class DockerImage(jobmanager.common.job.NamedDocument):
+class DockerImage(jobmanager.common.NamedDocument):
     meta = {
         'max_documents': 10000,
-        'queryset_class': jobmanager.common.job.SerializableQuerySet,
+        'queryset_class': jobmanager.common.SerializableQuerySet,
         'indexes': [
             'uuid',
             'created',

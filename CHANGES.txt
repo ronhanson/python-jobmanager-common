@@ -39,3 +39,4 @@
 2018-03-28	--	v0.13.0	-- Big refactoring. Moved code to common. Added DockerImage object. Move Host to its own module.
 2018-03-28	--	v0.13.1	-- Requirements update
 2018-03-28	--	v0.13.2	-- requirements update
+2018-03-28	--	v0.13.3	-- Fix
