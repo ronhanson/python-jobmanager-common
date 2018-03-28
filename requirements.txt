@@ -4,3 +4,5 @@ pymongo >= 3.6
 mongoengine >= 0.15
 blinker >=1.4
 log4mongo >= 1.6
+psutil >= 2.2
+pip >= 9.0
