@@ -163,3 +163,24 @@ class JobTask(mongoengine.EmbeddedDocument, common.Runnable, common.LogProxy, co
     def update_progress(self, completion, text=None):
         self.update_status(completion=completion, text=text)
 
+
+def make_job(job_name, **kwargs):
+    """
+    Decorator to create a Job from a function.
+    Give a job name and add extra fields to the job.
+
+        @make_job("ExecuteDecJob",
+                  command=mongoengine.StringField(required=True),
+                  output=mongoengine.StringField(default=None))
+        def execute(job: Job):
+            job.log_info('ExecuteJob %s - Executing command...' % job.uuid)
+            result = subprocess.run(job.command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            job.output = result.stdout.decode('utf-8') + " " + result.stderr.decode('utf-8')
+
+    """
+    def wraps(func):
+        kwargs['process'] = func
+        job = type(job_name, (Job,), kwargs)
+        globals()[job_name] = job
+        return job
+    return wraps
