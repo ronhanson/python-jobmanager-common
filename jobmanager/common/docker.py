@@ -11,7 +11,6 @@ import jobmanager.common
 
 class DockerImage(jobmanager.common.NamedDocument):
     meta = {
-        'max_documents': 10000,
         'queryset_class': jobmanager.common.SerializableQuerySet,
         'indexes': [
             'uuid',

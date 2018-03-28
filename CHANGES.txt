@@ -41,3 +41,4 @@
 2018-03-28	--	v0.13.2	-- requirements update
 2018-03-28	--	v0.13.3	-- Fix
 2018-03-28	--	v0.13.4	-- Added make_job decorator
+2018-03-29	--	v0.13.5	-- fix
