@@ -140,7 +140,7 @@ class NamedDocument(BaseDocument):
         return self.name
 
 
-class LogProxy:
+class LogProxy(object):
 
     def __str__(self):
         return self.name
@@ -175,7 +175,7 @@ class LogProxy:
         return self.log(text, logging.exception)
 
 
-class TempFolderProxy:
+class TempFolderProxy(object):
 
     @property
     def temp_folders(self):
