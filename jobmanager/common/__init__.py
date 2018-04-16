@@ -276,7 +276,7 @@ class Runnable(TempFolderProxy):
         self.save()
 
 
-class AutoDocumentable:
+class AutoDocumentable(object):
     @classmethod
     def get_doc(cls):
         import textwrap

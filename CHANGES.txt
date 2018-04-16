@@ -43,3 +43,4 @@
 2018-03-28	--	v0.13.4	-- Added make_job decorator
 2018-03-29	--	v0.13.5	-- fix
 2018-04-17	--	v0.13.6	-- Fixed class definition for python 2.7
+2018-04-17	--	v0.13.7	-- Fix class definition for python  2.7:wq
