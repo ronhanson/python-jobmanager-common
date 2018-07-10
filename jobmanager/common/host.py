@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 import platform
 import socket
 import psutil
-import pip
+import pkg_resources
 import mongoengine
 import jobmanager
 import jobmanager.common as common
@@ -149,8 +149,7 @@ class Host(common.BaseDocument):
         host.boot_time = datetime.fromtimestamp(psutil.boot_time())
         host.pid = os.getpid()
         host.python_version = sys.version.split(' ')[0]
-        host.python_packages = sorted(
-            ["%s (%s)" % (i.key, i.version) for i in pip.get_installed_distributions(local_only=False)])
+        host.python_packages = sorted(["%s (%s)" % (i.key, i.version) for i in pkg_resources.working_set])
         host.save()
         logging.info("Host '%s' config updated in database." % hostname)
         return host
@@ -162,8 +161,10 @@ class Host(common.BaseDocument):
         if not job_slots:
             logging.info('Job Slots not set in env or command line args. Setting to default job defined amount.')
             job_slots = {k.__name__: k.default_slot_amount() for k in job_classes}
-        for c in job_classes:
-            class_name = c.__name__
+        available_class_names = {c.__name__ for c in job_classes}
+        previous_class_names = set(self.job_slots.keys())
+        all_class_names = previous_class_names | available_class_names
+        for class_name in all_class_names:
             if class_name not in job_slots.keys():
                 self.job_slots[class_name] = 0
             else:
