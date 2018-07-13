@@ -215,7 +215,7 @@ class TempFolderProxy(object):
         return self.__temp_folders
 
     def get_new_temp_folder(self, prefix=None):
-        if prefix:
+        if prefix and prefix[-1] != '_':
             prefix = prefix + '_'
         temp_folder = tempfile.mkdtemp(prefix=prefix)
         self.temp_folders.append(temp_folder)
