@@ -299,9 +299,11 @@ class Runnable(TempFolderProxy):
         return result
 
     def save_as_successful(self):
+        self.status='success'
         self.save()
 
     def save_as_error(self):
+        self.status='error'
         self.save()
 
 

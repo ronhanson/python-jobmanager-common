@@ -103,9 +103,12 @@ class Job(common.NamedDocument, common.Runnable, common.LogProxy, common.AutoDoc
 
     def save_as_successful(self, text="Job Successful"):
         self.update_status(100, text=text)
+        self.save()  # Saves a other fields
 
     def save_as_error(self, text="Job Error"):
+        self.status = 'error'
         self.update_status(text=text)
+        self.save()
 
 
 mongoengine.signals.pre_save.connect(common.update_modified)
@@ -144,7 +147,7 @@ class JobTask(mongoengine.EmbeddedDocument, common.Runnable, common.LogProxy, co
             hashlib.sha1(mongoengine.EmbeddedDocument.to_json(self, sort_keys=True).encode()).digest()).decode().strip('=').replace("+", "-")
 
     def update_status(self, completion=None, text=None):
-        #TODO : Review this part // Completion between tasks and jobs is not clear.
+        # TODO : Review this part // Completion between tasks and jobs is not clear.
         if text:
             self.job.status_text = text
 
@@ -159,6 +162,12 @@ class JobTask(mongoengine.EmbeddedDocument, common.Runnable, common.LogProxy, co
             progress=self.job.completion,
             message=text
         ))
+
+        self.job.update(
+            add_to_set__history={'t': datetime.utcnow(), 'k': self.name, 'm': text, 'c': completion},
+            completion=completion,
+            status_text=text
+        )
 
     def update_progress(self, completion, text=None):
         self.update_status(completion=completion, text=text)

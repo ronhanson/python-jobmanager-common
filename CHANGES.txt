@@ -46,3 +46,4 @@
 2018-04-17	--	v0.13.7	-- Fix class definition for python  2.7:wq
 2018-07-10	--	v0.13.8	-- Refactored some code
 2018-07-13	--	v0.13.9	-- Minor improvment
+2018-10-08	--	v0.13.10	-- Minor fix to get the results saved in job.
